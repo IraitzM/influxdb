@@ -7,36 +7,44 @@ Along this lines we will familiarize ourselves with time series data bases, in t
 
 ![](images/Influxdb_logo.png)
 
-For this code to run a local installation of it is assumed to be running and listening on port 8086. Docker can be easily used for this purpose, just pulling the image.
-
-```{bash}
-docker pull influxdb
+For this code to run a local installation of it is assumed to be running and listening on port 8086. Docker can be easily used for this purpose, just pulling the image and making it run.
 ```
-And making it run.
-
-```{bash}
-docker run -p 8086:8086 -p 2003:2003 -e INFLUXDB_GRAPHITE_ENABLED=true -v $PWD:/var/lib/influxdb --name some-influx -d influxdb
+docker run -d --name=some-influx \
+ -p 8086:8086 \
+ -v  /tmp/testdata/influx:/root/.influxdbv2 quay.io/influxdb/influxdb:v2.0.3
 ```
 We are good to go. Now, from R there is a library we may use to interact with our database.
 
 ```{r}
-library(influxdbr)
+library(dplyr)
+library(magrittr)
+library(lubridate)
+library(influxdbclient)
+```
+
+```{r}
 # Opens connection to InfluxDb
-con <- influx_connection(host = "localhost", port = 8086)
+client <- InfluxDBClient$new(url = "http://localhost:8086", token="uEDVlXcEYgPnyjkfM1Rlh7TnWEsiXYoJkcpvmFuOUQJU_mRublorZ4OmoAsh9tlPWU5ZQ41TmGhKmXekPYwDUQ==", org="Deusto")
 ```
 
-Done! We can interrogate our database about existing databases.
 
-```{r}
-show_databases(con)
-```
-There is none. Ok, lets create one for our tests.
+Done! We can interrogate our database about its status.
 
 ```{r}
-# create new database
-create_database(con = con, db = "test")
-show_databases(con)
+# Ready status
+client$ready()
 ```
+```{r}
+# Healt info
+client$health()
+```
+And check if there is any bucket that can be used.
+
+
+```{r}
+client$query('from(bucket:"Santander") |> range(start: -1s)')
+```
+
 In order to test InfluxDB's functionalities we will need some sensor data. We can retrieve some data from Santander's open platform for example.
 
 ![](images/sod.png)
@@ -55,52 +63,76 @@ data
 We will do some cleansing. URL and identifier don't seem very useful and idSensor and medida have the same value.
 
 ```{r}
-library(dplyr)
-library(magrittr)
-library(lubridate)
-data %<>% select(dc.modified, ayto.medida, ayto.intensidad, ayto.ocupacion, ayto.carga) %>% rename(timestamp = dc.modified, sensorid = ayto.medida, intensity = ayto.intensidad, occupancy = ayto.ocupacion, load = ayto.carga ) %>% mutate(timestamp = as_datetime(timestamp, tz = "UTC"))
+data %<>% 
+  select(dc.modified, ayto.medida, ayto.intensidad, ayto.ocupacion, ayto.carga) %>% 
+  rename(timestamp = dc.modified, sensorid = ayto.medida, intensity = ayto.intensidad, occupancy = ayto.ocupacion, load = ayto.carga ) %>%
+  mutate(timestamp = as_datetime(timestamp, tz = "UTC"))
+
+# Lets add the measurement (table) it belongs to
+data[,"_measurement"] <- "traffic"
+
+# And check the output
 data
 ```
-Great now that we have our data ready, let's put it into the database.
+Great now that we have our data ready, let's put it into the database. Some things to clarify:
+
+* *bucket*: name of the database where our data will be stored
+* *precision*: to be used when timestamp is parsed
+* *tags*: tags are how we are going to identify metric types or device identifiers in order to group them afterwards
+* *fields*: which columns from our dataframe contain measured values (sensor data)
+* *time*: timestamp columns within our dataframe
 
 ```{r}
-influx_write(con = con, 
-             db = "test",
-             x = data,
-             time_col = "timestamp", tag_cols = c("sensorid"),
-             measurement = "traffic")
+client$write(data, 
+             bucket = "Santander", 
+             precision = "ms",
+             tagCols = c("sensorid"),
+             fieldCols = c("intensity", "occupancy","load"),
+             timeCol = "timestamp")
 ```
 
-Great! We have our database informed. Have we? Let's check it out. First, see if measurement exists.
-
-```{r}
-show_measurements(con, db="test", where = NULL)
+Great! We have our database informed. Have we? Let's check it out. We need to muster Flux for that...
 ```
-So each measurement will be tagged by a sensorid, given that this are independent from one another.
-
-```{r}
-show_tag_keys(con, db="test", measurement = NULL)
-```
-```{r}
-show_tag_values(con, db="test", measurement = NULL, key="sensorid")
-```
-
-And each sensorid should have three available fields.
-
-```{r}
-show_field_keys(con, db="test", measurement = NULL)
-```
-
-So we should be able to ask for the intensity of a given sensor at a given point in time.
-
-```{r}
-r <- influx_query(con, db = "test", query = "SELECT time, intensity FROM traffic WHERE time > now() -1h")
-as.data.frame(r)
+from(bucket: "Santander") 
+  |> range(start: -5h) 
+  |> filter(fn: (r) => r["_measurement"] == "traffic" and r["_field"] == "load") 
+  |> group(columns: ["sensorid"]) 
+  |> yield(name: "mean")
 ```
 
 ```{r}
-r <- influx_query(con, db = "test", query = "SELECT time, intensity FROM traffic WHERE time > now() -1h AND sensorid = '1001'")
-as.data.frame(r)
+q <- 'from(bucket: "Santander") |> range(start: -7h) |> filter(fn: (r) => r["_measurement"] == "traffic" and r["_field"] == "load")  |> group(columns: ["sensorid"]) |> yield(name: "mean")'
+result <- client$query(q, flatSingleResult = TRUE)
+length(result)
+```
+
+That's our requested information for all 482 sensor ids. Let's check the first one.
+
+```{r}
+result[1]
+```
+
+
+So each measurement will be tagged by a sensor id, given that this are independent from one another. We could ask for information not existent in our database as time series might be required to interpolate their information in order to e useful...
+```
+from(bucket: "Santander") 
+  |> range(start: -5h, stop: -4h)
+  |> filter(fn: (r) => r["_measurement"] == "traffic")
+  |> filter(fn: (r) => r["_field"] == "load") 
+  |> group(columns: ["sensorid"]) 
+  |> aggregateWindow(every: 10s, fn: mean, createEmpty: true)
+  |> yield(name: "mean")
+```
+
+
+```{r}
+q <- 'from(bucket: "Santander") |> range(start: -5h, stop: -4h) |> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["_field"] == "load") |> group(columns: ["sensorid"]) |> aggregateWindow(every: 10m, fn: mean, createEmpty: true)|> yield(name: "mean")'
+result <- client$query(q)
+length(result)
+```
+
+```{r}
+result[1]
 ```
 
 We can keep on adding information. We can define a function that does it for us.
@@ -114,11 +146,12 @@ addinfo <- function()
   # Format and clean
   data %<>% select(dc.modified, ayto.medida, ayto.intensidad, ayto.ocupacion, ayto.carga)%>% rename(timestamp = dc.modified, sensorid = ayto.medida, intensity = ayto.intensidad, occupancy = ayto.ocupacion, load = ayto.carga )%>% mutate(timestamp = as_datetime(timestamp, tz = "UTC"))
   # Insert
-  influx_write(con = con, 
-               db = "test",
-               x = data,
-               time_col = "timestamp", tag_cols = c("sensorid"),
-               measurement = "traffic")
+  client$write(data, 
+             bucket = "Santander", 
+             precision = "ms",
+             tagCols = c("sensorid"),
+             fieldCols = c("intensity", "occupancy","load"),
+             timeCol = "timestamp")
 }
 ```
 
@@ -212,7 +245,7 @@ r <- influx_query(con, db = "test", query = "SELECT * FROM downsampled_traffic W
 as.data.frame(r)
 ```
 
-Let's clear everything up
-```{bash}
+Let's clear everything up by calling
+```
 docker stop some-influx
 ```
