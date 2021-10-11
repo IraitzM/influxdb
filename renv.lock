@@ -16,6 +16,27 @@
       "Repository": "CRAN",
       "Hash": "470851b6d5d0ac559e9d01bb352b4021"
     },
+    "Rcpp": {
+      "Package": "Rcpp",
+      "Version": "1.0.7",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "dab19adae4440ae55aa8a9d238b246bb"
+    },
+    "RcppCCTZ": {
+      "Package": "RcppCCTZ",
+      "Version": "0.2.9",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "b0826082b7ae7063e42d06856afed2d6"
+    },
+    "RcppDate": {
+      "Package": "RcppDate",
+      "Version": "0.0.3",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "08cc427d6fe7a63e604cfa11aad31006"
+    },
     "askpass": {
       "Package": "askpass",
       "Version": "1.1",
@@ -29,6 +50,20 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "543776ae6848fde2f48ff3816d0628bc"
+    },
+    "bit": {
+      "Package": "bit",
+      "Version": "4.0.4",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "f36715f14d94678eea9933af927bc15d"
+    },
+    "bit64": {
+      "Package": "bit64",
+      "Version": "4.0.5",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "9fe98599ca456d6552421db0d6772d8f"
     },
     "cli": {
       "Package": "cli",
@@ -135,12 +170,12 @@
       "Repository": "CRAN",
       "Hash": "a525aba14184fec243f9eaec62fbed43"
     },
-    "influxdbr": {
-      "Package": "influxdbr",
-      "Version": "0.14.2",
+    "influxdbclient": {
+      "Package": "influxdbclient",
+      "Version": "0.1.0",
       "Source": "Repository",
       "Repository": "CRAN",
-      "Hash": "fb3d0730f3a6de3b9c09081910cca9bc"
+      "Hash": "5bd8e8bd577ba92deb157d4ef35cd3a5"
     },
     "jquerylib": {
       "Package": "jquerylib",
@@ -198,6 +233,13 @@
       "Repository": "CRAN",
       "Hash": "18e9c28c1d3ca1560ce30658b22ce104"
     },
+    "nanotime": {
+      "Package": "nanotime",
+      "Version": "0.3.3",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "c1b742e4bbc8915e195cae36b1a0155c"
+    },
     "openssl": {
       "Package": "openssl",
       "Version": "1.4.5",
@@ -218,6 +260,13 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "01f28d4278f15c76cddbea05899c5d6f"
+    },
+    "plyr": {
+      "Package": "plyr",
+      "Version": "1.8.6",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "ec0e5ab4e5f851f6ef32cd1d1984957f"
     },
     "purrr": {
       "Package": "purrr",
@@ -275,13 +324,6 @@
       "Repository": "CRAN",
       "Hash": "36eb05ad4cfdfeaa56f5a9b2a1311efd"
     },
-    "tidyr": {
-      "Package": "tidyr",
-      "Version": "1.1.4",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Hash": "c8fbdbd9fcac223d6c6fe8e406f368e1"
-    },
     "tidyselect": {
       "Package": "tidyselect",
       "Version": "1.1.1",
@@ -316,13 +358,6 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "a270216f7ffda25e53298293046d1d05"
-    },
-    "xts": {
-      "Package": "xts",
-      "Version": "0.12.1",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Hash": "ca2fd4ad8ef78cca3aa2b30f992798a8"
     },
     "yaml": {
       "Package": "yaml",
