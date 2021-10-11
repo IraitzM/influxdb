@@ -22,11 +22,14 @@ library(lubridate)
 library(influxdbclient)
 ```
 
+In order to connect we will need to provide an organization name and a token. this token can be retrieved from the data screen by selecting the language we would like to connect with. Here is the example using Python:
+
+![](images/tokenPython.PNG)
+
 ```{r}
 # Opens connection to InfluxDb
-client <- InfluxDBClient$new(url = "http://localhost:8086", token="uEDVlXcEYgPnyjkfM1Rlh7TnWEsiXYoJkcpvmFuOUQJU_mRublorZ4OmoAsh9tlPWU5ZQ41TmGhKmXekPYwDUQ==", org="Deusto")
+client <- InfluxDBClient$new(url = "http://localhost:8086", token="my_token", org="my_org")
 ```
-
 
 Done! We can interrogate our database about its status.
 
@@ -38,7 +41,9 @@ client$ready()
 # Healt info
 client$health()
 ```
-And check if there is any bucket that can be used.
+And check if there is any bucket that can be used. If we created one using the initial interface it will be shown under *Data > Buckets*
+
+![](images/bucket.PNG)
 
 
 ```{r}
@@ -48,11 +53,11 @@ client$query('from(bucket:"Santander") |> range(start: -1s)')
 In order to test InfluxDB's functionalities we will need some sensor data. We can retrieve some data from Santander's open platform for example.
 
 ![](images/sod.png)
-They have traffic sensors all over the city informed every minute or so so it should be a good candidate for sensor metrics. You can fin more information [here](http://datos.santander.es/resource/?ds=datos-trafico&id=626c514f-d6a0-4efe-95bd-3f1cd4dc531e&ft=CSV).
+They have traffic sensors all over the city informed every minute or so, thus it should be a good candidate for sensor metrics. You can find more information [here](http://datos.santander.es/resource/?ds=datos-trafico&id=626c514f-d6a0-4efe-95bd-3f1cd4dc531e&ft=CSV).
 
 ```{r}
-url <- "http://datos.santander.es/api/rest/datasets/mediciones.csv?items=482&rnd=863974585"
-data <- read.csv(url)
+source("../src/dataLoader.R")
+data <- load_data()
 ```
 
 Nice, lets have a look at it.
@@ -60,7 +65,7 @@ Nice, lets have a look at it.
 ```{r}
 data
 ```
-We will do some cleansing. URL and identifier don't seem very useful and idSensor and medida have the same value.
+We will do some cleansing. URL and identifier don't seem to be very useful and idSensor and medida have the same value. Also, name of the measurement (similar to *table* concept in RDBMS) should be assigned, **traffic** in our example.
 
 ```{r}
 data %<>% 
@@ -91,17 +96,17 @@ client$write(data,
              timeCol = "timestamp")
 ```
 
-Great! We have our database informed. Have we? Let's check it out. We need to muster Flux for that...
+Great! We have our database informed. Have we? Let's check it out. We need to master Flux for that...
 ```
 from(bucket: "Santander") 
-  |> range(start: -5h) 
-  |> filter(fn: (r) => r["_measurement"] == "traffic" and r["_field"] == "load") 
+  |> range(start: -1h) 
+  |> filter(fn: (r) => r["_measurement"] == "traffic") 
   |> group(columns: ["sensorid"]) 
   |> yield(name: "mean")
 ```
 
 ```{r}
-q <- 'from(bucket: "Santander") |> range(start: -7h) |> filter(fn: (r) => r["_measurement"] == "traffic" and r["_field"] == "load")  |> group(columns: ["sensorid"]) |> yield(name: "mean")'
+q <- 'from(bucket: "Santander") |> range(start: -1h) |> filter(fn: (r) => r["_measurement"] == "traffic")  |> group(columns: ["sensorid"]) |> yield(name: "mean")'
 result <- client$query(q, flatSingleResult = TRUE)
 length(result)
 ```
@@ -113,10 +118,10 @@ result[1]
 ```
 
 
-So each measurement will be tagged by a sensor id, given that this are independent from one another. We could ask for information not existent in our database as time series might be required to interpolate their information in order to e useful...
+So each measurement will be tagged by a sensor id, given that they are independent from one another. We could ask for information not existent in our database as time series might be required to interpolate their information in order to be useful... Let's try to obtain just the **load** information.
 ```
 from(bucket: "Santander") 
-  |> range(start: -5h, stop: -4h)
+  |> range(start: -1h)
   |> filter(fn: (r) => r["_measurement"] == "traffic")
   |> filter(fn: (r) => r["_field"] == "load") 
   |> group(columns: ["sensorid"]) 
@@ -126,7 +131,7 @@ from(bucket: "Santander")
 
 
 ```{r}
-q <- 'from(bucket: "Santander") |> range(start: -5h, stop: -4h) |> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["_field"] == "load") |> group(columns: ["sensorid"]) |> aggregateWindow(every: 10m, fn: mean, createEmpty: true)|> yield(name: "mean")'
+q <- 'from(bucket: "Santander") |> range(start: -1h) |> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["_field"] == "load") |> group(columns: ["sensorid"]) |> aggregateWindow(every: 10m, fn: mean, createEmpty: true)|> yield(name: "mean")'
 result <- client$query(q)
 length(result)
 ```
@@ -135,16 +140,21 @@ length(result)
 result[1]
 ```
 
-We can keep on adding information. We can define a function that does it for us.
+Well, having only one measured point could be complicated to interpolate. We can keep on adding information so We will define a function that does it for us.
 
 ```{r}
 addinfo <- function()
 { 
   # Get the information
-  url <- "http://datos.santander.es/api/rest/datasets/mediciones.csv?items=482&rnd=863974585"
-  data <- read.csv(url)
+  data <- load_data()
   # Format and clean
-  data %<>% select(dc.modified, ayto.medida, ayto.intensidad, ayto.ocupacion, ayto.carga)%>% rename(timestamp = dc.modified, sensorid = ayto.medida, intensity = ayto.intensidad, occupancy = ayto.ocupacion, load = ayto.carga )%>% mutate(timestamp = as_datetime(timestamp, tz = "UTC"))
+  data %<>% 
+    select(dc.modified, ayto.medida, ayto.intensidad, ayto.ocupacion, ayto.carga) %>% 
+    rename(timestamp = dc.modified, sensorid = ayto.medida, intensity = ayto.intensidad, occupancy = ayto.ocupacion, load = ayto.carga ) %>%
+    mutate(timestamp = as_datetime(timestamp, tz = "UTC"))
+  
+  # Lets add the measurement (table) it belongs to
+  data[,"_measurement"] <- "traffic"
   # Insert
   client$write(data, 
              bucket = "Santander", 
@@ -155,9 +165,11 @@ addinfo <- function()
 }
 ```
 
-And keep calling as much as we want.
+And keep calling as much as we want. Given that Santander's webpage updates every minute or minute and a half will only check within those intervals.
 
 ```{r}
+addinfo()
+Sys.sleep(90) # Wait for 90 seconds
 addinfo()
 Sys.sleep(90) # Wait for 90 seconds
 addinfo()
@@ -169,81 +181,86 @@ addinfo()
 
 Let's see what we have got.
 
-```{r}
-r <- influx_query(con, db = "test", query = "SELECT time, intensity FROM traffic WHERE time > now() -1h AND sensorid = '1001'")
-as.data.frame(r)
+```
+from(bucket: "Santander")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r["_measurement"] == "traffic")
+  |> filter(fn: (r) => r["sensorid"] == "1001")
+  |> aggregateWindow(every: 2m, fn: mean, createEmpty: true)
+  |> yield()
 ```
 
-Nice, two measurements. But being a time series we do know that we will need some intermediate measurements. That is when a Time Series Database becomes handy.
 
 ```{r}
-r <- influx_query(con, db = "test", query = "SELECT time, mean(intensity) as intensity, mean(load) as load FROM traffic WHERE time > now() -10m AND sensorid = '1001' GROUP BY TIME(2m)")
-as.data.frame(r)
-```
-Wait, timestamps have been rounded up and data averaged.
-
-So we can ask for information at a given point in time even if it doesn't exist? Yes, but there is no data for those "artificially created" points in time. Some interpolation might be required.
-
-```{r}
-r <- influx_query(con, db = "test", query = "SELECT time, mean(intensity) as intensity, mean(load) as load FROM traffic WHERE time > now() -10m AND sensorid = '1001' GROUP BY TIME(1m) FILL(linear)")
-as.data.frame(r)
+q <- 'from(bucket: "Santander")|> range(start: -1h)|> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["sensorid"] == "1001")|> aggregateWindow(every: 2m, fn: mean, createEmpty: true)|> yield()'
+result <- client$query(q)
+length(result)
 ```
 
-Nice! That's cool. Extrapolating can be a little bit too much but at least those intermediate values are informed now.
-
-Another interesting aspect are retention policies. Do we need same data resolution for all our measurements? The idea is that storage can be compromised when storing sensor information for long periods and old information might not be as relevant as recent information, so, can we store an aggregated version of it?
+Nice, three measurements. But being a time series we do know that we will need some intermediate measurements. That is when a Time Series Database becomes handy.
 
 ```{r}
-show_retention_policies(con, db="test")
-```
-Let's erase old information.
-
-```{r}
-create_retention_policy(con, db = "test", rp_name = "default_rp", duration = "1h", replication = 1, default = TRUE)
+result[1]
 ```
 
 ```{r}
-show_retention_policies(con, db="test")
-```
-
-That means every bit of information will expire when it is 1 hour old. Well, we can prevent this by calling what it is called a continuous query. This query will trigger every defined time lapse and aggregate the information into a separate measurement.
-
-```{r}
-q <- "CREATE CONTINUOUS QUERY traffic10m ON test BEGIN
-  SELECT mean(intensity) AS intensity, mean(load) AS load
-  INTO default_rp.downsampled_traffic
-  FROM traffic
-  GROUP BY time(10m), sensorid
-END"
-influx_query(con, db = "test", query = q)
-```
-
-Let's add some more info.
-```{r}
-addinfo()
-Sys.sleep(90) # Wait for 90 seconds
-addinfo()
-Sys.sleep(90) # Wait for 90 seconds
-addinfo()
-Sys.sleep(90) # Wait for 90 seconds
-addinfo()
-```
-
-That means that if we wait enough...
-```{r}
-r <- influx_query(con, db = "test", query = "SELECT time, mean(intensity) as intensity, mean(load) as load FROM traffic WHERE time > now() -10m AND sensorid = '1001' GROUP BY TIME(1m) FILL(linear)")
-as.data.frame(r)
-```
-
-Let's see what we have...
-```{r}
-show_measurements(con, db="test", where = NULL)
+result[2]
 ```
 
 ```{r}
-r <- influx_query(con, db = "test", query = "SELECT * FROM downsampled_traffic WHERE sensorid = '1001'")
-as.data.frame(r)
+result[3]
 ```
+
+Lets see what happens when we fill missing values with previous measured ones.
+
+```
+from(bucket: "Santander")
+  |> range(start: -20m)
+  |> filter(fn: (r) => r["_measurement"] == "traffic")
+  |> filter(fn: (r) => r["sensorid"] == "1001")
+  |> aggregateWindow(every: 1m, fn: mean, createEmpty: true)
+  |> fill(usePrevious : true)
+  |> yield()
+```
+
+```{r}
+q <- 'from(bucket: "Santander")|> range(start: -20m)|> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["sensorid"] == "1001")|> aggregateWindow(every: 10s, fn: mean, createEmpty: true)|> fill(usePrevious : true)|> yield()'
+result <- client$query(q)
+result[1]
+```
+
+Wait, timestamps have been rounded up and data averaged. So we can ask for information at a given point in time even if it doesn't exist? Yes, but there is no data for those *artificially created* value points in time. Some interpolation might be required and adding our own custom function is even possible. Lets just simply see how it differs from **mean** to **mode** functions
+
+```
+from(bucket: "Santander")
+  |> range(start: -30m)
+  |> filter(fn: (r) => r["_measurement"] == "traffic")
+  |> filter(fn: (r) => r["sensorid"] == "1001")
+  |> aggregateWindow(every: 1m, fn: mean)
+  |> fill(usePrevious : true)
+  |> yield()
+```
+
+
+```{r}
+q <- 'from(bucket: "Santander")|> range(start: -30m)|> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["sensorid"] == "1001")|> aggregateWindow(every: 1m, fn: mean)|> fill(usePrevious : true)|> yield()'
+result <- client$query(q)
+result[1]
+```
+
+```{r}
+q <- 'from(bucket: "Santander")|> range(start: -30m)|> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["sensorid"] == "1001")|> aggregateWindow(every: 1m, fn: mode)|> fill(usePrevious : true)|> yield()'
+result <- client$query(q)
+result[1]
+```
+
+Nice! That's cool. Seems risky to use the mode when mainly zeros are found :) Of course this is much more visual when using the browser based interface.
+
+![](images/mean.png)
+
+But of course, data is the same.
+
+![](images/data.PNG)
 
 Let's clear everything up by calling
 ```
