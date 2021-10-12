@@ -168,18 +168,13 @@ addinfo <- function()
 And keep calling as much as we want. Given that Santander's webpage updates every minute or minute and a half will only check within those intervals.
 
 ```{r}
-addinfo()
-Sys.sleep(90) # Wait for 90 seconds
-addinfo()
-Sys.sleep(90) # Wait for 90 seconds
-addinfo()
-Sys.sleep(90) # Wait for 90 seconds
-addinfo()
-Sys.sleep(90) # Wait for 90 seconds
-addinfo()
+for (i in 1:20){
+  addinfo()
+  Sys.sleep(90) # Wait for 90 seconds
+}
 ```
 
-Let's see what we have got.
+Let's see what we have got. Will this loop is running we could check in InfluxDB's interface some of its functionalities for aggregating data for a given sensor.
 
 ```
 from(bucket: "Santander")
@@ -190,6 +185,33 @@ from(bucket: "Santander")
   |> yield()
 ```
 
+Interpolation of the results
+
+```
+import "interpolate"
+
+from(bucket: "Santander")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r["_measurement"] == "traffic")
+  |> filter(fn: (r) => r["sensorid"] == "1001")
+  |> toFloat()
+  |> interpolate.linear(every: 10s)
+  |> yield()
+```
+
+![](images/interpolate.png)
+
+Or even some HoltWinters forecasting
+
+```
+from(bucket: "Santander")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r["_measurement"] == "traffic")
+  |> filter(fn: (r) => r["sensorid"] == "1001")
+  |> holtWinters(n: 10, interval: 1m)
+  |> yield()
+```
+![](images/hw.png)
 
 ```{r}
 q <- 'from(bucket: "Santander")|> range(start: -1h)|> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["sensorid"] == "1001")|> aggregateWindow(every: 2m, fn: mean, createEmpty: true)|> yield()'
@@ -215,7 +237,7 @@ Lets see what happens when we fill missing values with previous measured ones.
 
 ```
 from(bucket: "Santander")
-  |> range(start: -20m)
+  |> range(start: -1h)
   |> filter(fn: (r) => r["_measurement"] == "traffic")
   |> filter(fn: (r) => r["sensorid"] == "1001")
   |> aggregateWindow(every: 1m, fn: mean, createEmpty: true)
@@ -224,7 +246,7 @@ from(bucket: "Santander")
 ```
 
 ```{r}
-q <- 'from(bucket: "Santander")|> range(start: -20m)|> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["sensorid"] == "1001")|> aggregateWindow(every: 10s, fn: mean, createEmpty: true)|> fill(usePrevious : true)|> yield()'
+q <- 'from(bucket: "Santander")|> range(start: -1h)|> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["sensorid"] == "1001")|> aggregateWindow(every: 10s, fn: mean, createEmpty: true)|> fill(usePrevious : true)|> yield()'
 result <- client$query(q)
 result[1]
 ```
@@ -233,7 +255,7 @@ Wait, timestamps have been rounded up and data averaged. So we can ask for infor
 
 ```
 from(bucket: "Santander")
-  |> range(start: -30m)
+  |> range(start: -1h)
   |> filter(fn: (r) => r["_measurement"] == "traffic")
   |> filter(fn: (r) => r["sensorid"] == "1001")
   |> aggregateWindow(every: 1m, fn: mean)
@@ -243,13 +265,13 @@ from(bucket: "Santander")
 
 
 ```{r}
-q <- 'from(bucket: "Santander")|> range(start: -30m)|> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["sensorid"] == "1001")|> aggregateWindow(every: 1m, fn: mean)|> fill(usePrevious : true)|> yield()'
+q <- 'from(bucket: "Santander")|> range(start: -1h)|> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["sensorid"] == "1001")|> aggregateWindow(every: 1m, fn: mean)|> fill(usePrevious : true)|> yield()'
 result <- client$query(q)
 result[1]
 ```
 
 ```{r}
-q <- 'from(bucket: "Santander")|> range(start: -30m)|> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["sensorid"] == "1001")|> aggregateWindow(every: 1m, fn: mode)|> fill(usePrevious : true)|> yield()'
+q <- 'from(bucket: "Santander")|> range(start: -1h)|> filter(fn: (r) => r["_measurement"] == "traffic")|> filter(fn: (r) => r["sensorid"] == "1001")|> aggregateWindow(every: 1m, fn: mode)|> fill(usePrevious : true)|> yield()'
 result <- client$query(q)
 result[1]
 ```
